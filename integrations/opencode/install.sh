@@ -47,7 +47,7 @@ if path.exists():
         raise SystemExit(f"无法读取 {path}: {exc}")
 
 config["repo"] = os.environ["REPO_ROOT"]
-config.setdefault("autoPush", True)
+config.setdefault("autoPush", False)
 path.write_text(
     json.dumps(config, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
@@ -64,4 +64,5 @@ log ""
 log "在 OpenCode 中执行 /reload（或重启），然后："
 log "  /learn 了解大模型的 logits 是什么"
 log ""
+log "默认只提交到本地；审核后执行 /learn publish 推送。"
 log "其他命令：/learn status · /learn publish · /learn stop"

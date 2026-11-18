@@ -90,7 +90,7 @@ def auto_push() -> bool:
     if env is not None:
         return env.strip().lower() not in {"0", "false", "no", "off"}
     cfg = load_config()
-    return bool(cfg.get("autoPush", True))
+    return bool(cfg.get("autoPush", False))
 
 
 def run_git(
@@ -860,8 +860,10 @@ def file_preview(path: Path) -> list[str]:
     return [line.strip() for line in lines if line.strip()][:8]
 
 
-def diff_preview(repo: Path, path: str) -> tuple[list[str], list[str], bool]:
-    proc = run_git(repo, ["diff", "HEAD", "--unified=0", "--", path], check=False)
+def diff_preview(
+    repo: Path, path: str, base: str = "HEAD"
+) -> tuple[list[str], list[str], bool]:
+    proc = run_git(repo, ["diff", base, "--unified=0", "--", path], check=False)
     added: list[str] = []
     removed: list[str] = []
     for line in proc.stdout.splitlines():
@@ -933,6 +935,69 @@ def pending_files(repo: Path, dirty_lines: list[str]) -> list[dict]:
     return pending
 
 
+def publish_files(
+    repo: Path, upstream: str | None, dirty_lines: list[str]
+) -> list[dict]:
+    if not upstream:
+        return []
+    dirty_paths = {
+        parsed[1]
+        for line in dirty_lines
+        if (parsed := split_status_line(line)) is not None
+    }
+    proc = run_git(
+        repo,
+        ["diff", "--no-renames", "--name-only", upstream, "--", "knowledge"],
+        check=False,
+    )
+    files = []
+    for rel in sorted(
+        {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+    ):
+        candidate = repo / rel
+        in_upstream = (
+            run_git(
+                repo, ["cat-file", "-e", f"{upstream}:{rel}"], check=False
+            ).returncode
+            == 0
+        )
+        if candidate.is_file() and not in_upstream:
+            label = "新增"
+        elif in_upstream and not candidate.is_file():
+            label = "删除"
+        else:
+            label = "修改"
+
+        title = ""
+        added: list[str] = []
+        removed: list[str] = []
+        truncated = False
+        if candidate.suffix == ".md" and candidate.is_file() and label == "新增":
+            title, preview = note_preview(candidate)
+            added = preview
+        elif candidate.suffix == ".md" and candidate.is_file():
+            title, preview = note_preview(candidate)
+            added, removed, truncated = diff_preview(repo, rel, base=upstream)
+            if not added and not removed:
+                added = preview
+        else:
+            added, removed, truncated = diff_preview(repo, rel, base=upstream)
+            if label == "新增" and not added:
+                added = file_preview(candidate)
+        files.append(
+            {
+                "path": rel,
+                "title": title,
+                "statusLabel": label,
+                "added": added,
+                "removed": removed,
+                "truncated": truncated,
+                "uncommitted": rel in dirty_paths,
+            }
+        )
+    return files
+
+
 def unpushed_commits(repo: Path, upstream: str | None) -> list[dict]:
     if not upstream:
         return []
@@ -993,6 +1058,12 @@ def cmd_status(repo: Path) -> dict:
     ).stdout.strip()
     pending = pending_files(repo, dirty_lines)
     commits = unpushed_commits(repo, upstream_name)
+    publish = publish_files(repo, upstream_name, dirty_lines)
+    seen = {item["path"] for item in publish}
+    for item in pending:
+        if item["path"] not in seen:
+            publish.append({**item, "uncommitted": True})
+    publish.sort(key=lambda item: item["path"])
     return {
         "ok": True,
         "repo": str(repo),
@@ -1000,9 +1071,13 @@ def cmd_status(repo: Path) -> dict:
         "upstream": upstream_name,
         "dirty": dirty_lines,
         "pending": pending,
+        "publishFiles": publish,
         "unpushed": unpushed,
         "unpushedCommits": commits,
-        "publishable": {"files": len(pending), "commits": len(commits)},
+        "publishable": {
+            "files": len(publish) if upstream_name else len(pending),
+            "commits": len(commits),
+        },
         "recent": [line for line in recent_raw.splitlines() if line.strip()],
     }
 

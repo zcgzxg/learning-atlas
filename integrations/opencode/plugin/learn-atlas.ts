@@ -179,20 +179,24 @@ function formatStatus(mode, result) {
     lines.push(`未提交改动：${Array.isArray(data.dirty) ? data.dirty.length : 0}`);
 
     const pending = Array.isArray(data.pending) ? data.pending : [];
+    const publishFiles = Array.isArray(data.publishFiles)
+      ? data.publishFiles
+      : pending;
     const commits = Array.isArray(data.unpushedCommits)
       ? data.unpushedCommits
       : [];
     lines.push("");
     lines.push("**待发布内容**");
-    if (!pending.length && !commits.length) {
+    if (!publishFiles.length && !commits.length) {
       lines.push("没有待发布内容。");
     } else {
-      if (pending.length) {
-        lines.push(`未提交文件（${pending.length}）：`);
-        for (const item of pending.slice(0, 8)) {
+      if (publishFiles.length) {
+        lines.push(`待发布文件（${publishFiles.length}）：`);
+        for (const item of publishFiles.slice(0, 8)) {
           const title = item.title ? ` ${item.title}` : "";
+          const state = item.uncommitted === false ? "待推送" : "未提交";
           lines.push(
-            `- \`${item.path}\`（${item.statusLabel || item.status}）${title}`,
+            `- \`${item.path}\`（${item.statusLabel || item.status} · ${state}）${title}`,
           );
           for (const line of (item.added || []).slice(0, 4)) {
             lines.push(`  + ${line}`);
@@ -202,8 +206,8 @@ function formatStatus(mode, result) {
           }
           if (item.truncated) lines.push("  …");
         }
-        if (pending.length > 8) {
-          lines.push(`- …还有 ${pending.length - 8} 个文件`);
+        if (publishFiles.length > 8) {
+          lines.push(`- …还有 ${publishFiles.length - 8} 个文件`);
         }
       }
       if (commits.length) {
@@ -253,7 +257,10 @@ function formatPublish(result) {
   if (data.changed) {
     return `已提交${data.commit ? ` \`${data.commit}\`` : ""}并推送到 GitHub。`;
   }
-  return "没有待提交的笔记，仓库已是最新。";
+  if (data.pushed) {
+    return "已推送待发布的提交，仓库已是最新。";
+  }
+  return "没有待发布内容，仓库已是最新。";
 }
 
 function instructions(mode) {

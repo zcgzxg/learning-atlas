@@ -35,7 +35,7 @@ bash integrations/opencode/install.sh
 
 安装后在 OpenCode 中执行 `/reload`（或重启 OpenCode）。依赖：Git、Python 3、已登录的 `gh`（仅首次建仓需要）。
 
-工作方式：插件为当前会话注入学习模式提示；每轮回答结束后，AI 调用 skill 里的 `learn.py`，先搜索已有页面，能合并就合并，不能合并才新建目录与页面，然后自动提交并推送。每篇笔记除了“是什么”，还要记录核心运行机制、参数影响、边界和失败模式。GitHub Actions 随即重建站点。
+工作方式：插件为当前会话注入学习模式提示；每轮回答结束后，AI 调用 skill 里的 `learn.py`，先搜索已有页面，能合并就合并，不能合并才新建目录与页面，然后自动提交到本地。每篇笔记除了“是什么”，还要记录核心运行机制、参数影响、边界和失败模式。用 `/learn status` 审核待发布内容，确认后 `/learn publish` 推送；也可在 `~/.config/opencode/learn-atlas.json` 把 `autoPush` 设为 `true` 恢复自动推送。GitHub Actions 随即重建站点。
 
 ## 目录结构
 

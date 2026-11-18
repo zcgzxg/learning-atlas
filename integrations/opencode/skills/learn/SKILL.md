@@ -145,6 +145,8 @@ JSON
 - `pushError` 非空：提交已在本地，推送失败；告诉用户可执行 `/learn publish` 重试。
 - `mechanismAdded` / `pointsAdded`：本次分别新增了多少条机制和要点。
 
+默认 `add` 只提交到本地，不自动推送；用户可用 `/learn status` 审核，确认后 `/learn publish` 推送。
+
 ### 4. 需要改写或纠错时
 
 如果新知识与旧页面矛盾，或你要重写整段而非追加：
@@ -184,4 +186,4 @@ $LEARN publish              # 提交并推送所有 pending 笔记
 $LEARN finalize <path>      # 手动编辑后更新日期并提交
 ```
 
-`status` 会列出未提交的 `knowledge/` 文件，以及每个文件新增/删除的关键行和未推送提交，方便审核与补充。审核后可直接改笔记，再执行 `/learn publish`。
+`status` 会列出相对 upstream 的所有待发布文件（含已提交未推送和未提交的改动），以及每个文件新增/删除的关键行和未推送提交，方便审核与补充。审核后可直接改笔记，再执行 `/learn publish`。
