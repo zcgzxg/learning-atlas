@@ -146,8 +146,8 @@ const categoryCards = topDirs
 
 const emptyState =
   pages.length === 0
-    ? '\n还没有笔记。在 OpenCode 中输入 `/learn <主题>` 开始。\n'
-    : `\n## 最近更新\n\n<CardGrid>\n${recentCards}\n</CardGrid>\n\n## 知识分类\n\n<CardGrid>\n${categoryCards}\n</CardGrid>\n\n共 ${pages.length} 篇笔记，持续更新。\n`;
+    ? `\n${config.tagline}\n\n还没有笔记。在 OpenCode 中输入 \`/learn <主题>\` 开始。\n`
+    : `\n${config.tagline}\n\n## 最近更新\n\n<CardGrid>\n${recentCards}\n</CardGrid>\n\n## 知识分类\n\n<CardGrid>\n${categoryCards}\n</CardGrid>\n\n共 ${pages.length} 篇笔记，持续更新。\n`;
 
 const index = `---
 title: ${quote(config.title)}
