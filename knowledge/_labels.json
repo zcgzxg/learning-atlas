@@ -1,0 +1,6 @@
+{
+  "ai": "AI",
+  "ai/llm": "大模型",
+  "frontend": "前端",
+  "frontend/ui": "UI"
+}

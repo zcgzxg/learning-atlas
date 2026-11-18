@@ -1,0 +1,152 @@
+---
+name: learn
+description: 把对话中值得长期保留的知识写入 learn-atlas 学习图谱。用于学习模式（上下文含【learn-atlas 学习模式】）下每轮回答结束后自动沉淀结论，或用户明确要求“记到学习图谱/知识库”时。会先搜索已有页面，优先合并，必要时新建目录和笔记，并自动提交推送。
+---
+
+# learn-atlas：把知识种进图谱
+
+你的任务不是复述整段回答，而是判断：**这轮对话里有没有值得几个月后重新看的东西？** 有，就把它压缩成几条准确的结论，合并进知识库；没有，就什么都不做。
+
+## 何时使用
+
+- 上下文出现 `【learn-atlas 学习模式】`：在正常回答结束后执行本流程。
+- 用户明确说“记下来 / 写入知识库 / 存到学习图谱”：执行本流程。
+- 其他情况不要主动写入。
+
+## 先判断值不值得写
+
+值得写：
+
+- 定义、原理、机制、因果关系
+- 公式、参数含义、数量级
+- 权衡、适用边界、常见误区
+- 可复用的工程实践、设计原则、排查思路
+- 用户纠正了之前的理解，形成了更准确的结论
+
+不要写：
+
+- 寒暄、追问、情绪表达、对答案的评价
+- 一次性的命令输出、临时排错过程、工具报错
+- 有时效性的新闻、价格、版本号（除非是知识本身的一部分）
+- 不确定的猜测；宁可少写，不要写错
+- 密钥、token、密码、内部地址、公司内部数据、个人隐私
+- 只对当前私有代码库有意义的细节
+
+如果这轮只是澄清、举例或换个说法，没有新增结论，直接跳过，不要调用脚本。
+
+## 工作流
+
+### 1. 先搜索，避免重复建页
+
+```bash
+python3 "$HOME/.config/opencode/skills/learn/scripts/learn.py" search "logits softmax"
+```
+
+- 有高度相关的页面 → 合并进该页，复用它的 `category` 和 `slug`。
+- 只是相关但不是同一主题 → 新建页面。
+- 不确定目录时先看树：
+
+```bash
+python3 "$HOME/.config/opencode/skills/learn/scripts/learn.py" tree
+```
+
+路径约定：`knowledge/<category>/<slug>.md`，全部小写 kebab-case。一个主题一个页面，不要按对话建页。
+
+常见分类（优先复用已有分类）：
+
+```text
+ai/llm             大模型、推理、训练
+ai/ml              通用机器学习
+frontend/ui        界面、交互、设计系统
+frontend/react     React 生态
+backend/api        接口、服务端
+backend/db         数据库、存储
+devops             部署、CI、可观测性
+tools              工具、编辑器、工作流
+```
+
+标题用名词短语，例如 `Logits：模型的未归一化分数`，不要用“关于……的学习笔记”。
+
+### 2. 写 3–5 条要点
+
+- 一条一个结论，尽量一句话说完；复杂机制最多两句。
+- 中文表述，保留英文术语（logits、softmax、token、temperature）。
+- 数字、方向、因果关系必须准确；不确定就不写。
+- 不要把整段解释搬进去，不要写“本文介绍了……”。
+- 已有页面只追加真正的新结论；重复的会被脚本自动跳过。
+
+### 3. 调用 add 写入
+
+```bash
+python3 "$HOME/.config/opencode/skills/learn/scripts/learn.py" add <<'JSON'
+{
+  "category": "ai/llm",
+  "slug": "logits",
+  "title": "Logits：模型的未归一化分数",
+  "summary": "大模型输出层为词表候选 token 给出的原始分数",
+  "tags": ["llm", "inference", "softmax"],
+  "categoryLabel": "大模型",
+  "points": [
+    "logit 是模型输出层对每个候选 token 给出的未归一化分数，可为负数，本身不是概率。",
+    "softmax 把一组 logits 转成和为 1 的概率分布；所有 logit 同加一个常数不改变结果。",
+    "temperature 在 softmax 前除以 logits：T<1 分布更尖锐，T>1 更平坦，T→0 趋近贪心。"
+  ]
+}
+JSON
+```
+
+字段说明：
+
+- `category`：`knowledge/` 下的目录，至少一层；脚本会创建缺失目录。
+- `slug`：文件名（不含 `.md`），英文小写 kebab-case。
+- `title`：页面标题，≤80 字；已存在页面时保留原标题。
+- `summary`：一句话描述；新建页面时必填。
+- `tags`：2–5 个英文小写标签。
+- `categoryLabel`：目录的中文显示名，可省略；已有目录会沿用。
+- `points`：3–5 条（最多 10），每条 ≤400 字。
+
+输出是 JSON：
+
+- `ok: true, changed: true`：已写入并提交；`pushed` 表示是否推送成功。
+- `ok: true, changed: false`：要点都已存在，没有产生提交。
+- `ok: false`：看 `error`，修正后重试；不要盲目重复同一份内容。
+- `pushError` 非空：提交已在本地，推送失败；告诉用户可执行 `/learn publish` 重试。
+
+### 4. 需要改写或纠错时
+
+如果新知识与旧页面矛盾，或你要重写整段而非追加：
+
+1. 用文件工具读 `knowledge/...md`。
+2. 直接改正文，保留 frontmatter 结构，但不要手动改 `updated`。
+3. 运行：
+
+```bash
+python3 "$HOME/.config/opencode/skills/learn/scripts/learn.py" finalize knowledge/ai/llm/logits.md
+```
+
+`finalize` 会把 `updated` 更新为今天，并提交推送。
+
+## 输出纪律
+
+- 默认不要向用户解释“我写了哪些笔记”，也不要在回答末尾列归档清单。
+- 只有以下情况说一句：写入失败、推送失败、用户询问。
+- 每个用户回合最多调用一次 `add`；如果本轮已经写过，不要因为后续工具调用再次写入。
+- 不要把脚本输出原样贴给用户。
+
+## 失败处理
+
+- 提示“知识库目录不存在”：说明尚未安装或配置。让用户运行仓库里的 `integrations/opencode/install.sh`，不要擅自改仓库路径。
+- 提示包含密钥：删除敏感内容后重试，不要绕过检查。
+- 提示 git 失败：把关键错误告诉用户；不要执行 `git reset --hard`、`git push --force` 等破坏性操作。
+- 网络导致推送失败：保留本地提交，提示 `/learn publish` 或稍后重试即可。
+
+## 快速参考
+
+```bash
+LEARN="python3 $HOME/.config/opencode/skills/learn/scripts/learn.py"
+$LEARN search "关键词"      # 搜索标题、标签、正文
+$LEARN tree                 # 查看现有分类与页面
+$LEARN status               # 分支、未提交改动、未推送提交
+$LEARN publish              # 提交并推送所有 pending 笔记
+$LEARN finalize <path>      # 手动编辑后更新日期并提交
+```
