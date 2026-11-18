@@ -24,7 +24,7 @@ CONFIG_ENV = "LEARN_ATLAS_CONFIG"
 REPO_ENV = "LEARN_ATLAS_REPO"
 AUTO_PUSH_ENV = "LEARN_ATLAS_AUTO_PUSH"
 DEFAULT_CONFIG = Path.home() / ".config" / "opencode" / "learn-atlas.json"
-DEFAULT_REPO = Path.home() / "learning-atlas"
+DEFAULT_REPO = Path.home() / "code" / "github" / "learning-atlas"
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SECRET_PATTERNS = [
@@ -287,10 +287,26 @@ def clean_points(value) -> list[str]:
     if not isinstance(value, list) or not value:
         raise LearnError("points 必须是非空字符串数组")
     if len(value) > 10:
-        raise LearnError("points 最多 10 条，建议 3–5 条")
+        raise LearnError("points 最多 10 条，建议 2–4 条")
     result: list[str] = []
     for item in value:
         text = clean_text(item, "points", 400)
+        text = re.sub(r"^[-*]\s+", "", text)
+        if text not in result:
+            result.append(text)
+    return result
+
+
+def clean_mechanism(value) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise LearnError("mechanism 必须是字符串数组")
+    if len(value) > 8:
+        raise LearnError("mechanism 最多 8 条，建议 2–4 条")
+    result: list[str] = []
+    for item in value:
+        text = clean_text(item, "mechanism", 400)
         text = re.sub(r"^[-*]\s+", "", text)
         if text not in result:
             result.append(text)
@@ -301,36 +317,12 @@ def normalize_point(text: str) -> str:
     return "".join(ch for ch in text.lower() if ch.isalnum())
 
 
-def merge_points(body: str, points: list[str]) -> tuple[str, int, int]:
-    lines = body.split("\n")
-    heading = None
-    for index, line in enumerate(lines):
-        if line.strip() == "## 要点":
-            heading = index
-            break
-
-    if heading is None:
-        existing: list[str] = []
-        insert_at = len(lines)
-        section_end = len(lines)
-    else:
-        section_end = len(lines)
-        for index in range(heading + 1, len(lines)):
-            if re.match(r"^##\s+", lines[index]):
-                section_end = index
-                break
-        existing = []
-        for line in lines[heading + 1 : section_end]:
-            match = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
-            if match:
-                existing.append(match.group(1))
-        insert_at = section_end
-
+def dedupe_bullets(existing: list[str], bullets: list[str]) -> tuple[list[str], int]:
     existing_norms = [(item, normalize_point(item)) for item in existing]
     accepted: list[str] = []
     skipped = 0
-    for point in points:
-        norm = normalize_point(point)
+    for bullet in bullets:
+        norm = normalize_point(bullet)
         duplicate = False
         for _, old_norm in existing_norms:
             if norm == old_norm:
@@ -346,26 +338,92 @@ def merge_points(body: str, points: list[str]) -> tuple[str, int, int]:
         if duplicate:
             skipped += 1
             continue
-        existing_norms.append((point, norm))
-        accepted.append(point)
+        existing_norms.append((bullet, norm))
+        accepted.append(bullet)
+    return accepted, skipped
 
+
+def merge_bullets(
+    body: str,
+    heading: str,
+    bullets: list[str],
+    before_heading: str | None = None,
+    dedupe_all: bool = False,
+) -> tuple[str, int, int]:
+    """Merge bullets into a section, creating it if needed.
+
+    If the section is new and ``before_heading`` exists, insert the new
+    section before that heading so 概述 → 核心机制 → 要点 stays ordered.
+    """
+    if not bullets:
+        return body, 0, 0
+
+    lines = body.split("\n")
+    heading_index = None
+    for index, line in enumerate(lines):
+        if line.strip() == heading:
+            heading_index = index
+            break
+
+    existing: list[str] = []
+    section_end = len(lines)
+    if heading_index is not None:
+        for index in range(heading_index + 1, len(lines)):
+            if re.match(r"^##\s+", lines[index]):
+                section_end = index
+                break
+        for line in lines[heading_index + 1 : section_end]:
+            match = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+            if match:
+                existing.append(match.group(1))
+
+    if dedupe_all:
+        existing = [
+            match.group(1)
+            for line in lines
+            if (match := re.match(r"^\s*[-*]\s+(.+?)\s*$", line))
+        ]
+
+    accepted, skipped = dedupe_bullets(existing, bullets)
     if not accepted:
         return body, 0, skipped
 
-    if heading is None:
+    bullet_lines = [f"- {point}" for point in accepted]
+
+    if heading_index is None:
+        section = [heading, ""] + bullet_lines
+        if before_heading:
+            insert_at = next(
+                (
+                    index
+                    for index, line in enumerate(lines)
+                    if line.strip() == before_heading
+                ),
+                None,
+            )
+            if insert_at is not None:
+                before = lines[:insert_at]
+                after = lines[insert_at:]
+                while before and before[-1].strip() == "":
+                    before.pop()
+                new_lines = before + [""] + section + [""] + after
+                return (
+                    "\n".join(new_lines).strip("\n") + "\n",
+                    len(accepted),
+                    skipped,
+                )
         prefix = body.rstrip("\n")
-        addition = "\n\n## 要点\n\n" + "\n".join(f"- {point}" for point in accepted)
+        addition = "\n\n" + "\n".join(section)
         return (prefix + addition).strip("\n") + "\n", len(accepted), skipped
 
-    before = lines[:insert_at]
-    after = lines[insert_at:]
+    before = lines[:section_end]
+    after = lines[section_end:]
     while before and before[-1].strip() == "":
         before.pop()
-    bullets = [f"- {point}" for point in accepted]
-    if before and before[-1].strip() == "## 要点":
-        new_lines = before + [""] + bullets
+    if before and before[-1].strip() == heading:
+        new_lines = before + [""] + bullet_lines
     else:
-        new_lines = before + bullets
+        new_lines = before + bullet_lines
     if after:
         new_lines.append("")
         new_lines.extend(after)
@@ -456,6 +514,7 @@ def cmd_add(repo: Path) -> dict:
     summary = clean_text(summary_raw, "summary", 240) if summary_raw else ""
     tags = clean_tags(payload.get("tags"))
     points = clean_points(payload.get("points"))
+    mechanism = clean_mechanism(payload.get("mechanism"))
     label_raw = payload.get("categoryLabel", payload.get("label", ""))
     label = clean_text(label_raw, "categoryLabel", 40) if label_raw else ""
 
@@ -484,7 +543,18 @@ def cmd_add(repo: Path) -> dict:
             if not data.get("updated"):
                 data["updated"] = today()
 
-            new_body, added, skipped = merge_points(body, points)
+            new_body, mechanism_added, mechanism_skipped = merge_bullets(
+                body,
+                "## 核心机制",
+                mechanism,
+                before_heading="## 要点",
+                dedupe_all=True,
+            )
+            new_body, points_added, points_skipped = merge_bullets(
+                new_body, "## 要点", points, dedupe_all=True
+            )
+            added = mechanism_added + points_added
+            skipped = mechanism_skipped + points_skipped
             if added == 0:
                 result = {
                     "ok": True,
@@ -492,6 +562,8 @@ def cmd_add(repo: Path) -> dict:
                     "created": False,
                     "path": note_path.relative_to(repo).as_posix(),
                     "added": 0,
+                    "mechanismAdded": 0,
+                    "pointsAdded": 0,
                     "skipped": skipped,
                     "commit": None,
                 }
@@ -516,6 +588,8 @@ def cmd_add(repo: Path) -> dict:
                     "created": False,
                     "path": note_path.relative_to(repo).as_posix(),
                     "added": 0,
+                    "mechanismAdded": 0,
+                    "pointsAdded": 0,
                     "skipped": skipped,
                     "commit": None,
                 }
@@ -535,6 +609,8 @@ def cmd_add(repo: Path) -> dict:
                 "created": False,
                 "path": note_path.relative_to(repo).as_posix(),
                 "added": added,
+                "mechanismAdded": mechanism_added,
+                "pointsAdded": points_added,
                 "skipped": skipped,
                 "commit": commit,
             }
@@ -551,24 +627,29 @@ def cmd_add(repo: Path) -> dict:
             "tags": tags,
             "updated": today(),
         }
-        body = (
-            "## 概述\n\n"
-            + summary
-            + "\n\n## 要点\n\n"
-            + "\n".join(f"- {point}" for point in points)
-        )
+        body = "## 概述\n\n" + summary + "\n\n"
+        if mechanism:
+            body += (
+                "## 核心机制\n\n"
+                + "\n".join(f"- {point}" for point in mechanism)
+                + "\n\n"
+            )
+        body += "## 要点\n\n" + "\n".join(f"- {point}" for point in points)
         atomic_write(note_path, dump_note(data, body))
         paths = [note_path]
         if label_changed:
             paths.append(repo / "knowledge" / "_labels.json")
-        message = f"learn({category}): {title} (+{len(points)})"
+        added = len(mechanism) + len(points)
+        message = f"learn({category}): {title} (+{added})"
         commit = stage_and_commit(repo, paths, message)
         result = {
             "ok": True,
             "changed": True,
             "created": True,
             "path": note_path.relative_to(repo).as_posix(),
-            "added": len(points),
+            "added": added,
+            "mechanismAdded": len(mechanism),
+            "pointsAdded": len(points),
             "skipped": 0,
             "commit": commit,
         }
@@ -717,27 +798,211 @@ def cmd_tree(repo: Path) -> dict:
     return {"ok": True, "labels": labels, "categories": payload}
 
 
+def split_status_line(line: str) -> tuple[str, str] | None:
+    if len(line) < 4:
+        return None
+    status = line[:2]
+    path = line[3:].strip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    path = path.strip().strip('"')
+    return (status, path) if path else None
+
+
+def section_bullets(body: str, heading: str) -> list[str]:
+    lines = body.split("\n")
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == heading:
+            start = index
+            break
+    if start is None:
+        return []
+    result: list[str] = []
+    for line in lines[start + 1 :]:
+        if re.match(r"^##\s+", line):
+            break
+        match = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+        if match:
+            result.append(match.group(1))
+    return result
+
+
+def note_preview(path: Path) -> tuple[str, list[str]]:
+    try:
+        data, body, _ = read_note(path)
+    except LearnError:
+        return "", []
+    title = str(data.get("title") or "")
+    preview: list[str] = []
+    for heading in ("## 核心机制", "## 要点"):
+        bullets = section_bullets(body, heading)
+        if bullets:
+            preview.append(heading)
+            preview.extend(bullets)
+    if not preview:
+        for line in body.splitlines():
+            clean = line.strip()
+            if clean and not clean.startswith("#"):
+                preview.append(clean)
+            if len(preview) >= 8:
+                break
+    return title, preview[:10]
+
+
+def file_preview(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    return [line.strip() for line in lines if line.strip()][:8]
+
+
+def diff_preview(repo: Path, path: str) -> tuple[list[str], list[str], bool]:
+    proc = run_git(repo, ["diff", "HEAD", "--unified=0", "--", path], check=False)
+    added: list[str] = []
+    removed: list[str] = []
+    for line in proc.stdout.splitlines():
+        if line.startswith(("+++", "---")):
+            continue
+        if line.startswith("+"):
+            text = line[1:].strip()
+            text = re.sub(r"^[-*]\s+", "", text)
+            if text and not text.startswith("updated:"):
+                added.append(text)
+        elif line.startswith("-"):
+            text = line[1:].strip()
+            text = re.sub(r"^[-*]\s+", "", text)
+            if text and not text.startswith("updated:"):
+                removed.append(text)
+    return added[:8], removed[:8], len(added) > 8 or len(removed) > 8
+
+
+def status_label(status: str) -> str:
+    code = status.strip()
+    if code in {"??", "A", "AM"}:
+        return "新增"
+    if "D" in code:
+        return "删除"
+    if "R" in code:
+        return "重命名"
+    return "修改"
+
+
+def pending_files(repo: Path, dirty_lines: list[str]) -> list[dict]:
+    pending = []
+    for line in dirty_lines:
+        parsed = split_status_line(line)
+        if parsed is None:
+            continue
+        status, rel = parsed
+        candidate = repo / rel
+        label = status_label(status)
+        is_new = status.strip() in {"??", "A", "AM"}
+        title = ""
+        added: list[str] = []
+        removed: list[str] = []
+        truncated = False
+        if candidate.suffix == ".md" and candidate.is_file():
+            title, preview = note_preview(candidate)
+            if is_new:
+                added = preview
+            else:
+                added, removed, truncated = diff_preview(repo, rel)
+                if not added and not removed:
+                    added = preview
+        elif is_new:
+            added = file_preview(candidate)
+        else:
+            added, removed, truncated = diff_preview(repo, rel)
+            if not added and not removed:
+                added = file_preview(candidate)
+        pending.append(
+            {
+                "path": rel,
+                "title": title,
+                "status": status,
+                "statusLabel": label,
+                "added": added,
+                "removed": removed,
+                "truncated": truncated,
+            }
+        )
+    return pending
+
+
+def unpushed_commits(repo: Path, upstream: str | None) -> list[dict]:
+    if not upstream:
+        return []
+    proc = run_git(
+        repo,
+        [
+            "log",
+            "--format=@@%h%x09%s",
+            "--name-only",
+            f"{upstream}..HEAD",
+            "--",
+            "knowledge",
+        ],
+        check=False,
+    )
+    commits: list[dict] = []
+    current: dict | None = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("@@"):
+            if current is not None:
+                commits.append(current)
+            meta = line[2:].split("\t", 1)
+            current = {
+                "hash": meta[0],
+                "subject": meta[1] if len(meta) > 1 else "",
+                "files": [],
+            }
+        elif line.strip() and current is not None:
+            current["files"].append(line.strip())
+    if current is not None:
+        commits.append(current)
+    for commit in commits:
+        if len(commit["files"]) > 8:
+            commit["files"] = commit["files"][:8]
+            commit["filesTruncated"] = True
+        else:
+            commit["filesTruncated"] = False
+    return commits[:10]
+
+
 def cmd_status(repo: Path) -> dict:
     branch = run_git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
-    dirty = run_git(repo, ["status", "--porcelain", "--", "knowledge"]).stdout.strip()
+    dirty_raw = run_git(
+        repo, ["status", "--porcelain", "--", "knowledge"]
+    ).stdout.rstrip("\n")
+    dirty_lines = [line for line in dirty_raw.splitlines() if line.strip()]
     upstream = run_git(
         repo, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], check=False
     )
+    upstream_name = upstream.stdout.strip() if upstream.returncode == 0 else None
     unpushed = None
-    if upstream.returncode == 0:
+    if upstream_name:
         count = run_git(repo, ["rev-list", "--count", "@{u}..HEAD"], check=False)
         if count.returncode == 0 and count.stdout.strip().isdigit():
             unpushed = int(count.stdout.strip())
     recent_raw = run_git(
         repo, ["log", "-5", "--format=%h %s", "--", "knowledge"], check=False
     ).stdout.strip()
+    pending = pending_files(repo, dirty_lines)
+    commits = unpushed_commits(repo, upstream_name)
     return {
         "ok": True,
         "repo": str(repo),
         "branch": branch,
-        "upstream": upstream.stdout.strip() if upstream.returncode == 0 else None,
-        "dirty": [line for line in dirty.splitlines() if line.strip()],
+        "upstream": upstream_name,
+        "dirty": dirty_lines,
+        "pending": pending,
         "unpushed": unpushed,
+        "unpushedCommits": commits,
+        "publishable": {"files": len(pending), "commits": len(commits)},
         "recent": [line for line in recent_raw.splitlines() if line.strip()],
     }
 

@@ -49,7 +49,7 @@ function repoPath() {
   const fromConfig = readConfig().repo;
   return typeof fromConfig === "string" && fromConfig.trim()
     ? fromConfig.trim()
-    : join(homedir(), "learning-atlas");
+    : join(homedir(), "code", "github", "learning-atlas");
 }
 
 function modeKey(sessionID) {
@@ -135,14 +135,26 @@ function helpText() {
     "**learn-atlas 学习模式**",
     "",
     "```text",
+    "/learn            回顾当前会话，补录值得保留的知识",
     "/learn <主题>     开启学习模式并提问",
-    "/learn status     查看模式与仓库状态",
+    "/learn status     查看待发布内容与仓库状态",
     "/learn publish    立即提交并推送笔记",
     "/learn stop       退出学习模式",
     "```",
     "",
     `知识库：\`${repo}\`${repoReady ? "" : "（尚未找到 knowledge/ 目录）"}`,
     "开启后，AI 会正常回答，并在每轮结束时把可复用的结论合并进知识库。",
+  ].join("\n");
+}
+
+function scanPrompt() {
+  return [
+    "【learn-atlas 历史归档扫描】",
+    "这不是一个新的知识问题，不要重新回答历史问题，也不要输出归档清单。",
+    "请回顾当前会话中已经讨论过的内容，找出值得长期保留、且尚未写入知识库的知识。",
+    "按主题拆分：先用 learn skill 的 learn.py search 查重，再对每个不同主题分别调用 add 合并或新建页面，最多处理 5 个主题。",
+    "只记录准确、可复用、非敏感的内容；寒暄、追问、临时排错和不确定的猜测跳过。",
+    "如果没有任何值得新增的内容，只回复一句“当前会话没有需要新增的知识。”",
   ].join("\n");
 }
 
@@ -165,6 +177,54 @@ function formatStatus(mode, result) {
       `未推送提交：${data.unpushed === null ? "未知（无 upstream）" : data.unpushed}`,
     );
     lines.push(`未提交改动：${Array.isArray(data.dirty) ? data.dirty.length : 0}`);
+
+    const pending = Array.isArray(data.pending) ? data.pending : [];
+    const commits = Array.isArray(data.unpushedCommits)
+      ? data.unpushedCommits
+      : [];
+    lines.push("");
+    lines.push("**待发布内容**");
+    if (!pending.length && !commits.length) {
+      lines.push("没有待发布内容。");
+    } else {
+      if (pending.length) {
+        lines.push(`未提交文件（${pending.length}）：`);
+        for (const item of pending.slice(0, 8)) {
+          const title = item.title ? ` ${item.title}` : "";
+          lines.push(
+            `- \`${item.path}\`（${item.statusLabel || item.status}）${title}`,
+          );
+          for (const line of (item.added || []).slice(0, 4)) {
+            lines.push(`  + ${line}`);
+          }
+          for (const line of (item.removed || []).slice(0, 4)) {
+            lines.push(`  - ${line}`);
+          }
+          if (item.truncated) lines.push("  …");
+        }
+        if (pending.length > 8) {
+          lines.push(`- …还有 ${pending.length - 8} 个文件`);
+        }
+      }
+      if (commits.length) {
+        lines.push(`未推送提交（${commits.length}）：`);
+        for (const commit of commits.slice(0, 5)) {
+          lines.push(`- \`${commit.hash}\` ${commit.subject}`);
+          if (Array.isArray(commit.files) && commit.files.length) {
+            const files = commit.files.slice(0, 4).join("、");
+            const suffix =
+              commit.filesTruncated || commit.files.length > 4 ? " …" : "";
+            lines.push(`  ${files}${suffix}`);
+          }
+        }
+        if (commits.length > 5) {
+          lines.push(`- …还有 ${commits.length - 5} 个提交`);
+        }
+      }
+      lines.push("");
+      lines.push("审核/补充后执行 `/learn publish` 发布。");
+    }
+
     if (Array.isArray(data.recent) && data.recent.length) {
       lines.push("");
       lines.push("最近提交：");
@@ -177,7 +237,7 @@ function formatStatus(mode, result) {
 
   if (!mode) {
     lines.push("");
-    lines.push("使用 `/learn <主题>` 开始。");
+    lines.push("使用 `/learn` 回顾当前会话，或 `/learn <主题>` 开始。");
   }
   return lines.join("\n");
 }
@@ -205,9 +265,10 @@ function instructions(mode) {
     "1. 先正常、完整地回答用户，不要因为要归档而压缩答案。",
     "2. 回答结束后，判断本轮是否产生了值得长期保留的新知识。若有，调用 learn skill，用其中的 learn.py 合并 3–5 条要点；优先复用已有页面，只有确实是新主题才新建目录。",
     "3. 只记录准确、可复用、非敏感的内容；不确定、时效性强、私人或内部信息不记录；寒暄、追问、临时排错不记录。",
-    "4. 每个用户回合最多写入一次；本轮已经调用过 learn.py 就不要再写。",
-    "5. 默认不要向用户解释归档过程；只有写入失败或用户询问时才说明。",
-    "6. 学习模式持续到用户执行 /learn stop。",
+    "4. 普通用户回合最多写入一次；如果收到【learn-atlas 历史归档扫描】指令，则按主题分别写入，最多 5 个页面。",
+    "5. 历史归档扫描不是新的提问：不要重新回答历史问题，只把已有结论补录进知识库。",
+    "6. 默认不要向用户解释归档过程；只有写入失败或用户询问时才说明。",
+    "7. 学习模式持续到用户执行 /learn stop。",
   ].join("\n");
 }
 
@@ -230,14 +291,34 @@ export default Plugin.define({
       editor.add({
         name: "learn",
         description:
-          "学习模式：正常回答并把可复用的知识自动沉淀到 learn-atlas 知识库",
+          "学习模式：/learn 回顾当前会话，/learn <主题> 正常回答并自动沉淀知识",
         execute: async ({ sessionID, prompt, delivery }) => {
           const raw = String(prompt?.text || "").trim();
           const arg = raw.replace(/^\/learn\b/i, "").trim();
           const lower = arg.toLowerCase();
 
           if (!arg) {
-            await notify(ctx, sessionID, helpText());
+            const existing = await getMode(ctx, sessionID);
+            const mode = existing ?? {
+              topic: "当前会话",
+              startedAt: new Date().toISOString(),
+            };
+            try {
+              if (!existing) await setMode(ctx, sessionID, mode);
+              await ctx.session.prompt({
+                ...prompt,
+                sessionID,
+                text: scanPrompt(),
+                delivery,
+              });
+            } catch (error) {
+              if (!existing) await clearMode(ctx, sessionID);
+              await notify(
+                ctx,
+                sessionID,
+                `无法回顾当前会话：${error instanceof Error ? error.message : error}`,
+              );
+            }
             return;
           }
 
