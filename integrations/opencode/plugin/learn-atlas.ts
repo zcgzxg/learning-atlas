@@ -198,10 +198,10 @@ function formatStatus(mode, result) {
           lines.push(
             `- \`${item.path}\`（${item.statusLabel || item.status} · ${state}）${title}`,
           );
-          for (const line of (item.added || []).slice(0, 4)) {
+          for (const line of (item.added || []).slice(0, 6)) {
             lines.push(`  + ${line}`);
           }
-          for (const line of (item.removed || []).slice(0, 4)) {
+          for (const line of (item.removed || []).slice(0, 6)) {
             lines.push(`  - ${line}`);
           }
           if (item.truncated) lines.push("  …");
