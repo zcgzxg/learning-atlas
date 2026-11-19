@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """learn-atlas knowledge CLI.
 
-把对话里沉淀下来的知识合并进 learning-atlas 仓库，并提交、推送。
-只使用 Python 标准库；所有输出都是 JSON，方便 agent 读取。
+把对话里沉淀下来的知识合并进 learning-atlas 仓库并提交到本地；
+审核后用 publish 推送。只使用 Python 标准库；所有输出都是 JSON，方便 agent 读取。
 """
 
 from __future__ import annotations
