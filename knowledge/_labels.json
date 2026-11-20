@@ -2,5 +2,6 @@
   "ai": "AI",
   "ai/llm": "大模型",
   "frontend": "前端",
-  "frontend/ui": "UI"
+  "frontend/ui": "UI",
+  "tools": "工具与工作流"
 }
