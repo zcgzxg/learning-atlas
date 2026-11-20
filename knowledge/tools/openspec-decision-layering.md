@@ -24,3 +24,6 @@ OpenSpec 用 proposal、delta spec、design、tasks 描述一次变更，归档�
 - bug fix 是否进入 OpenSpec 取决于修完后 specs 是否需要改：实现偏离既有 spec 的修复不进 change，只需代码修改加回归测试。
 - 只有 spec 缺失、写错或行为需要改变时才开 change（至少 proposal + delta spec + tasks，design 可省），因为 specs 是行为契约的唯一真相。
 - 紧急热修先止血再补流程：事后补 delta change 并 archive，避免 specs 与实现长期分叉；OpenSpec 不是 bug tracker，复现步骤和排查过程应留在 issue 或 PR。
+- archive 后 specs/ 仍为空通常不是 bug：纯重构、工具或文档类 change 设置 skip_specs: true（或归档时用 --skip-specs）就没有 delta 可合并，归档只移动目录。
+- specs/ 是长期能力契约（按 capability 组织，含 Purpose、Requirements、Scenario），changes/<name>/specs/ 是待合并的 delta，archive 是迁移历史；三者类似数据库当前 schema、migration 和 migration 历史。
+- archive 不会从代码反推 spec：要让 specs/ 反映现状，需显式建一个基线 change 写入 ADDED requirements；把 delta 文件手动拷进 specs/ 会因缺少 ## Purpose / ## Requirements 而 validate 失败。
