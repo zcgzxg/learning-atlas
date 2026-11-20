@@ -21,3 +21,6 @@ OpenSpec 用 proposal、delta spec、design、tasks 描述一次变更，归档�
 - 升格 ADR 的判定：影响多模块或长期架构、回退成本高、未来会被追问“为什么不用 X”，满足任意两条才写，避免每个 change 都产出 ADR。
 - 最小落地：docs/adr/NNNN-slug.md，ADR 不可改并以 Superseded 状态演进；design.md 链接 ADR，ADR 反向链接 change 名；在 openspec/config.yaml 的 context 中加入规则让 Agent 主动提示升格。
 - ADR 只写理由、不重复需求，spec 仍是行为的唯一真相；两者冲突时以 spec 为准，并新开 ADR 记录变更原因。
+- bug fix 是否进入 OpenSpec 取决于修完后 specs 是否需要改：实现偏离既有 spec 的修复不进 change，只需代码修改加回归测试。
+- 只有 spec 缺失、写错或行为需要改变时才开 change（至少 proposal + delta spec + tasks，design 可省），因为 specs 是行为契约的唯一真相。
+- 紧急热修先止血再补流程：事后补 delta change 并 archive，避免 specs 与实现长期分叉；OpenSpec 不是 bug tracker，复现步骤和排查过程应留在 issue 或 PR。
