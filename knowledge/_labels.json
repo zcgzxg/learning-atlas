@@ -3,5 +3,6 @@
   "ai/llm": "大模型",
   "frontend": "前端",
   "frontend/ui": "UI",
+  "mobile/native": "移动原生",
   "tools": "工具与工作流"
 }
